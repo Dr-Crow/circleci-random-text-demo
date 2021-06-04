@@ -1,9 +1,97 @@
 version: 2.1
 
-jobs:
+commands:
+  set-build-tools-env:
+    description: "Set environment variables needed for Build Tools"
+    steps:
+      - run:
+          name: Setup Build Tool's Environment Variables
+          command: |
+            echo "export GIT_BRANCH=${CIRCLE_BRANCH}" >> $BASH_ENV
+            if [ -z ${CIRCLE_PULL_REQUEST+x} ]; then echo "export IS_PULL_REQUEST='false'"; else echo "export IS_PULL_REQUEST='true'"; fi  >> $BASH_ENV
+            source $BASH_ENV
+
   build:
-    docker:
-      - image: circleci/python:3.9-browsers
+    description: "Build Docker image via Build Tools"
+    steps:
+      - checkout
+      - run:
+          name: Build Docker Image
+          command: ./.ci/build.sh -f Dockerfile --image ${DOCKER_IMAGE}:${CIRCLE_SHA1}
+
+  save-docker-image:
+    description: "Saves a Docker image for future Jobs"
+    steps:
+      - run: mkdir -p /tmp/docker-images/
+      - run:
+          name: Saving Docker Image
+          command: docker save --output /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}.tar ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}
+      - persist_to_workspace:
+          root: /tmp
+          paths:
+            - docker-images/*
+
+  load-docker-image:
+    description: "Loads a Docker image"
+    steps:
+      - attach_workspace:
+          at: /tmp
+      - run:
+            name: Loading Docker Image
+            command: docker load --input /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}.tar
+
+  test:
+    description: "Launches tests against a Docker image"
+    steps:
+      - checkout
+      - run:
+          name: Install goss
+          command: |
+            # rather than give internet scripts SU rights, we install to local user bin and add to path
+            export GOSS_DST=~/bin
+            export PATH=$PATH:~/bin
+            curl -fsSL https://goss.rocks/install | sh
+            goss -version
+      - run:
+          name: Run dgoss Test
+          command: dgoss run -p 8080:8080 ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}
+
+  push:
+    description: "Pushes Docker Image to DockerHub"
+    steps:
+      - checkout
+      - run:
+          name: Push Image
+          command: ./.ci/push.sh --image ${DOCKER_IMAGE}:${CIRCLE_SHA1}
+
+  tagging:
+    description: "Add tags to a Docker Image"
+    steps:
+      - checkout
+      - run:
+          name: Tag Image
+          command: ./.ci/tag-image.sh --image ${DOCKER_IMAGE}:${CIRCLE_SHA1} --tags "${CIRCLE_SHA1} latest"
+
+  docker-enable-experimental:
+    description: "Enable Experimental Features in Docker"
+    steps:
+      - checkout
+      - run:
+          name: Enable Experimental
+          command: ./.ci/enable-experimental.sh
+
+  manifests:
+    description: "Make and Push Manifests for Docker Images"
+    steps:
+      - checkout
+      - run:
+          name: Make and Push Manifests
+          command: |
+            ./.ci/manifest.sh --image ${DOCKER_IMAGE} --manifest ${CIRCLE_SHA1} --push
+            ./.ci/manifest.sh --image ${DOCKER_IMAGE} --manifest latest --push
+
+  run-pytest:
+    description: "Run PyTest"
     steps:
       - checkout
       - run:
@@ -13,7 +101,129 @@ jobs:
           name: Run PyTest Test Suite
           command: pytest --live-server-port 8080 --verbose
 
-workflows:
-  pytest:
-    jobs:
+executors:
+  arm64:
+    machine:
+      image: ubuntu-2004:202101-01
+    resource_class: arm.medium
+
+  amd64:
+    machine:
+      image: ubuntu-2004:202010-01
+    resource_class: medium
+
+  browsers-python:
+    docker:
+      - image: circleci/python:3.9-browsers
+
+
+jobs:
+  test-demo:
+    executor: browsers-python
+    steps:
+      - run-pytest
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      RELEASE_BRANCH: main
+
+  build-image:
+    parameters:
+      architecture:
+        type: executor
+    executor: << parameters.architecture >>
+    steps:
+      - set-build-tools-env
       - build
+      - save-docker-image
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      RELEASE_BRANCH: main
+
+  test-image:
+    parameters:
+      architecture:
+        type: executor
+    executor: << parameters.architecture >>
+    steps:
+      - set-build-tools-env
+      - load-docker-image
+      - test
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      GOSS_SLEEP: 10
+
+  push-image:
+    parameters:
+      architecture:
+        type: executor
+    executor: << parameters.architecture >>
+    steps:
+      - set-build-tools-env
+      - load-docker-image
+      - push
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      RELEASE_BRANCH: main
+
+  tagging-image:
+    executor: amd64
+    steps:
+      - set-build-tools-env
+      - tagging
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      RELEASE_BRANCH: main
+      SUPPORTED_ARCHITECTURES: "amd64 arm64"
+
+  make-manifests:
+    executor: amd64
+    steps:
+      - set-build-tools-env
+      - docker-enable-experimental
+      - manifests
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+      RELEASE_BRANCH: main
+      SUPPORTED_ARCHITECTURES: "amd64 arm64"
+
+workflows:
+  demo:
+    jobs:
+      - test-demo:
+          name: "Testing Python Demo Code"
+      - build-image:
+          name: "Building << matrix.architecture >> Image"
+          matrix:
+            parameters:
+              architecture: ["arm64", "amd64"]
+          requires:
+            - "Testing Python Demo Code"
+      - test-image:
+          name: "Testing << matrix.architecture >> Image"
+          matrix:
+            parameters:
+              architecture: ["arm64", "amd64"]
+          requires:
+            - "Building << matrix.architecture >> Image"
+      - push-image:
+          name: "Pushing << matrix.architecture >> Image"
+          matrix:
+            parameters:
+              architecture: ["arm64", "amd64"]
+          requires:
+            - "Testing << matrix.architecture >> Image"
+      - tagging-image:
+          name: "Tagging Images"
+          requires:
+            - "Pushing arm64 Image"
+            - "Pushing amd64 Image"
+      - make-manifests:
+          name: "Making and Push Manifests"
+          requires:
+            - "Tagging Images"
