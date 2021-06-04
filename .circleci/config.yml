@@ -92,14 +92,20 @@ commands:
 
   run-pytest:
     description: "Run PyTest"
+    parameters:
+      requirements-path:
+        type: string
+      pytest-args:
+        type: string
+        default: "--verbose"
     steps:
       - checkout
       - run:
           name: Pip Install Testing Requirements
-          command: pip install -r ./demo/requirements/testing.txt
+          command: pip install -r << parameters.requirements-path >>
       - run:
           name: Run PyTest Test Suite
-          command: pytest --live-server-port 8080 --verbose
+          command: pytest << parameters.pytest-args >>
 
 executors:
   arm64:
@@ -122,10 +128,9 @@ jobs:
     executor: browsers-python
     steps:
       - run-pytest
-    environment:
-      DOCKER_IMAGE: random-text-demo
-      DOCKER_NAMESPACE: drcrow
-      RELEASE_BRANCH: main
+    parameters:
+      - requirements-path: "./demo/requirements/testing.txt"
+      - pytest-args: "--live-server-port 8080 --verbose"
 
   build-image:
     parameters:
