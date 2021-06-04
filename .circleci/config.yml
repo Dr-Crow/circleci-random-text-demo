@@ -127,10 +127,9 @@ jobs:
   test-demo:
     executor: browsers-python
     steps:
-      - run-pytest
-    parameters:
-      requirements-path: "./demo/requirements/testing.txt"
-      pytest-args: "--live-server-port 8080 --verbose"
+      - run-pytest:
+          requirements-path: "./demo/requirements/testing.txt"
+          pytest-args: "--live-server-port 8080 --verbose"
 
   build-image:
     parameters:
