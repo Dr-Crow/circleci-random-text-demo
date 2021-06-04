@@ -1,0 +1,19 @@
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: circleci/python:3.9-browsers
+    steps:
+      - checkout
+      - run:
+          name: Pip Install Testing Requirements
+          command: pip install -r ./demo/requirements/testing.txt
+      - run:
+          name: Run PyTest Test Suite
+          command: pytest --live-server-port 8080 --verbose
+
+workflows:
+  pytest:
+    jobs:
+      - build
