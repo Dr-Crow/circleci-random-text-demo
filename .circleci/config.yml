@@ -129,8 +129,8 @@ jobs:
     steps:
       - run-pytest
     parameters:
-      - requirements-path: "./demo/requirements/testing.txt"
-      - pytest-args: "--live-server-port 8080 --verbose"
+      requirements-path: "./demo/requirements/testing.txt"
+      pytest-args: "--live-server-port 8080 --verbose"
 
   build-image:
     parameters:
