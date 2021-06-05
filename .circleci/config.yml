@@ -223,7 +223,7 @@ jobs:
       SUPPORTED_ARCHITECTURES: "amd64 arm64"
 
   deploy-to-heroku:
-    executor: heroku/stable
+    executor: heroku/default
     steps:
       - set-build-tools-env
       - checkout
