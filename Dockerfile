@@ -4,13 +4,13 @@ ARG USER=demo
 ARG GROUP=demo
 ARG UID=1000
 ARG GID=1000
-ARG HTTP_PORT=8080
+ARG PORT=8080
 
 # Set enviroment variable for Flask
-ENV HTTP_PORT=${HTTP_PORT}
+ENV PORT=${PORT}
 
 # Expose the server port
-EXPOSE ${HTTP_PORT}
+EXPOSE ${PORT}
 
 # Copy in requirements file for demo
 COPY ./demo /demo

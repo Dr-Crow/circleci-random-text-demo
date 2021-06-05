@@ -1,14 +1,19 @@
 version: 2.1
 
+orbs:
+  heroku: circleci/heroku@1.2.6
+
 commands:
   set-build-tools-env:
     description: "Set environment variables needed for Build Tools"
     steps:
+      - checkout
       - run:
           name: Setup Build Tool's Environment Variables
           command: |
             echo "export GIT_BRANCH=${CIRCLE_BRANCH}" >> $BASH_ENV
-            if [ -z ${CIRCLE_PULL_REQUEST+x} ]; then echo "export IS_PULL_REQUEST='false'"; else echo "export IS_PULL_REQUEST='true'"; fi  >> $BASH_ENV
+            if [ -z ${CIRCLE_PULL_REQUEST+x} ]; then echo "export IS_PULL_REQUEST='false'"; else echo "export IS_PULL_REQUEST='true'"; fi  >> $BASH_ENV |
+            echo "export VERSION=$(cat VERSION)" >> $BASH_ENV
             source $BASH_ENV
 
   build:
@@ -17,7 +22,7 @@ commands:
       - checkout
       - run:
           name: Build Docker Image
-          command: ./.ci/build.sh -f Dockerfile --image ${DOCKER_IMAGE}:${CIRCLE_SHA1}
+          command: ./.ci/build.sh -f Dockerfile --image ${DOCKER_IMAGE}:${VERSION}-${CIRCLE_SHA1}
 
   save-docker-image:
     description: "Saves a Docker image for future Jobs"
@@ -25,7 +30,7 @@ commands:
       - run: mkdir -p /tmp/docker-images/
       - run:
           name: Saving Docker Image
-          command: docker save --output /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}.tar ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}
+          command: docker save --output /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${VERSION}-${CIRCLE_SHA1}.tar ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${VERSION}-${CIRCLE_SHA1}
       - persist_to_workspace:
           root: /tmp
           paths:
@@ -38,7 +43,7 @@ commands:
           at: /tmp
       - run:
             name: Loading Docker Image
-            command: docker load --input /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}.tar
+            command: docker load --input /tmp/docker-images/${DOCKER_NAMESPACE}-${DOCKER_IMAGE}-$(docker version -f {{.Server.Arch}})-${VERSION}-${CIRCLE_SHA1}.tar
 
   test:
     description: "Launches tests against a Docker image"
@@ -54,7 +59,7 @@ commands:
             goss -version
       - run:
           name: Run dgoss Test
-          command: dgoss run -p 8080:8080 ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${CIRCLE_SHA1}
+          command: dgoss run -p 8080:8080 ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:$(docker version -f {{.Server.Arch}})-${VERSION}-${CIRCLE_SHA1}
 
   push:
     description: "Pushes Docker Image to DockerHub"
@@ -62,7 +67,7 @@ commands:
       - checkout
       - run:
           name: Push Image
-          command: ./.ci/push.sh --image ${DOCKER_IMAGE}:${CIRCLE_SHA1}
+          command: ./.ci/push.sh --image ${DOCKER_IMAGE}:${VERSION}-${CIRCLE_SHA1}
 
   tagging:
     description: "Add tags to a Docker Image"
@@ -70,7 +75,7 @@ commands:
       - checkout
       - run:
           name: Tag Image
-          command: ./.ci/tag-image.sh --image ${DOCKER_IMAGE}:${CIRCLE_SHA1} --tags "${CIRCLE_SHA1} latest"
+          command: ./.ci/tag-image.sh --image ${DOCKER_IMAGE}:${VERSION}-${CIRCLE_SHA1} --tags "${CIRCLE_SHA1} ${VERSION} latest"
 
   docker-enable-experimental:
     description: "Enable Experimental Features in Docker"
@@ -88,6 +93,7 @@ commands:
           name: Make and Push Manifests
           command: |
             ./.ci/manifest.sh --image ${DOCKER_IMAGE} --manifest ${CIRCLE_SHA1} --push
+            ./.ci/manifest.sh --image ${DOCKER_IMAGE} --manifest ${VERSION} --push
             ./.ci/manifest.sh --image ${DOCKER_IMAGE} --manifest latest --push
 
   run-pytest:
@@ -106,6 +112,26 @@ commands:
       - run:
           name: Run PyTest Test Suite
           command: pytest << parameters.pytest-args >>
+
+  push-image-to-heroku:
+    description: "Push prebuilt Docker Image to Heroku Registry"
+    parameters:
+      process-types:
+        type: string
+        default: "web"
+    steps:
+      - run:
+          name: Pull Image from DockerHub
+          command: docker pull ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:${VERSION}
+      - run:
+          name: Tag Image for Heroku Registry
+          command: docker tag ${DOCKER_NAMESPACE}/${DOCKER_IMAGE}:${VERSION} registry.heroku.com/${HEROKU_APP_NAME}/<< parameters.process-types >>
+      - run:
+          name: Login to Heroku Docker image registry
+          command: heroku container:login
+      - run:
+          name: Push tagged Image to Heroku Registry
+          command: docker push registry.heroku.com/${HEROKU_APP_NAME}/<< parameters.process-types >>
 
 executors:
   arm64:
@@ -196,6 +222,21 @@ jobs:
       RELEASE_BRANCH: main
       SUPPORTED_ARCHITECTURES: "amd64 arm64"
 
+  deploy-to-heroku:
+    executor: heroku/stable
+    steps:
+      - set-build-tools-env
+      - checkout
+      - heroku/install
+      - push-image-to-heroku:
+          process-types: web
+      - heroku/release-docker-image:
+          process-types: web
+    environment:
+      DOCKER_IMAGE: random-text-demo
+      DOCKER_NAMESPACE: drcrow
+
+
 workflows:
   demo:
     jobs:
@@ -231,3 +272,7 @@ workflows:
           name: "Making and Push Manifests"
           requires:
             - "Tagging Images"
+      - deploy-to-heroku:
+          name: "Deploy Demo to Heroku"
+          requires:
+            - "Making and Push Manifests"
