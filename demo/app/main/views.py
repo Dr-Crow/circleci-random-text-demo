@@ -7,13 +7,13 @@ from . import main
 
 # Generate Random String
 def get_random_string():
-    # Grab the list of all ascii_letters
-    letters = string.ascii_letters
+    # Grab the list of all ascii_letters + all digits
+    letters_and_numbers = string.ascii_letters + string.digits
 
     # Using a random length between 5 and 15, generate a string of that length
-    # The string will randomly choose from  all ascii_letters
+    # The string will randomly choose from  all ascii_letters and all digits
     # Then join the string together
-    random_string = ''.join(random.choice(letters) for _ in range(random.randint(5, 15)))
+    random_string = ''.join(random.choice(letters_and_numbers) for _ in range(random.randint(5, 15)))
 
     return random_string
 
