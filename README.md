@@ -33,7 +33,7 @@ cuts down the overall build time of our pipeline by a couple of minutes.
 
 You can see the general flow of the workflow below:
 
-![Workflow](/.img/workflow.PNG?raw=true "Workflow")
+![Workflow](/.imgs/workflow.PNG?raw=true "Workflow")
 
 
 ## Deployment Documentation
@@ -162,4 +162,4 @@ f77d9f84fc69   drcrow/random-text-demo:1.1   "python3 -u flask_ru…"   About a 
 After the application starts, we can navigate to `http://localhost:8080` in the web browser. We should see a page
 that looks like this:
 
-![Home Page](/.img/home_page.PNG?raw=true "Home Page")
+![Home Page](/.imgs/home_page.PNG?raw=true "Home Page")
